@@ -1,0 +1,44 @@
+name: Mirror from B
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # 每 5 分钟检查一次（GitHub Actions 的最小建议间隔）
+  workflow_dispatch:       # 允许手动触发
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # 工作流自身只需读；真正的推送用你的 PUSH_TOKEN 完成
+
+    steps:
+      - name: Show context (debug)
+        run: |
+          echo "Run at: $(date -u) UTC"
+          git --version
+
+      - name: Mirror from B to A (Safe & Clean)
+        env:
+          SRC: https://github.com/wangchunsheng-ops/testgithub.git
+          DST: https://x-access-token:${{ secrets.PUSH_TOKEN }}@github.com/wangchunsheng-ops/mirror.git
+        run: |
+          set -e
+          echo "🚀 Cloning mirror from B..."
+          git clone --mirror "$SRC" mirror.git
+          cd mirror.git
+
+          # 🔥 STEP 1: 删除 GitHub 自动生成的 refs/pull/*，避免 push 被拒
+          echo "🧹 Removing refs/pull/* to avoid 'deny updating a hidden ref'..."
+          git for-each-ref --format='delete %(refname)' refs/pull | git update-ref --stdin
+
+          # 🔥 STEP 2: 删除 refs/notes/*（如 PR metadata），避免不必要的同步
+          echo "🧹 Removing refs/notes/*..."
+          git for-each-ref --format='delete %(refname)' refs/notes | git update-ref --stdin
+
+          # ✅ STEP 3: 只推送 heads 和 tags，不使用 --mirror（保护 .github 目录）
+          echo "📤 Pushing branches and tags to A..."
+          git push --force --prune "$DST" \
+            'refs/heads/*:refs/heads/*' \
+            'refs/tags/*:refs/tags/*'
+
+          echo "✅ Sync completed successfully. Your CI files are preserved!"
